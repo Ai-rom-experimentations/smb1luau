@@ -1,4 +1,7 @@
 build/
+roblox/*.rbxl
+roblox/*.rbxlx
+!roblox/SMB1Luau.rbxlx
 *.nes
 tools/Windows/emulator/*
 !tools/Windows/emulator/Mesen.exe

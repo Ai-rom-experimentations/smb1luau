@@ -41,6 +41,10 @@ mod for Mario!
 
 ### How to use
 
+### Experimental Roblox port
+
+An in-progress single-player Roblox client is in [`roblox/`](roblox/README.md). It exports the checked-in level, palette, metatile, and CHR data, and includes a source-driven area decoder, framebuffer renderer, Rojo project, and basic gameplay runtime. See `roblox/README.md` for Studio setup and current limitations.
+
 ### Features I want to have someday
 
 - Sooner than later
