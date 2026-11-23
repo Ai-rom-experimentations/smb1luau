@@ -317,6 +317,8 @@ local function buildMap(level, commands, header)
 			local extra = (object.length or 0) + 2
 			if object.kind == "special15" and object.id == 2 then
 				extra = 6
+			elseif object.kind == "special15" and object.id == 4 then
+				extra = 2
 			elseif object.kind == "special13" and object.id == 4 then
 				extra = 13
 			elseif object.kind == "large" and (object.id == 0 or object.id == 7) then
@@ -337,10 +339,13 @@ local function buildMap(level, commands, header)
 	end
 	level.pipes = {}
 	level.coins = {}
+	level.bridges = {}
 	level.flagX = nil
 	level.axeX = nil
+	level.chainX = nil
 	level.bridgeX = nil
 	level.castleX = nil
+	level.exitPipeX = nil
 	level.endX = (width - 3) * 16
 
 	drawBackdrop(level, {
@@ -380,10 +385,22 @@ local function buildMap(level, commands, header)
 		}
 		table.insert(level.pipes, pipe)
 		if not warp and (level.world > 1 or level.areaIndex > 1) then
+			local downY = row * 16
 			table.insert(level.enemies, {
-				type = 13, x = x * 16 + 8, y = row * 16 - 32,
-				vx = 0, vy = 0, alive = true, state = "pipePlant", static = true,
-				pipeY = row * 16 - 32,
+				type = 13,
+				x = x * 16 + 8,
+				y = downY,
+				vx = 0,
+				vy = 1,
+				alive = true,
+				state = "pipePlant",
+				static = false,
+				pipeY = downY,
+				downY = downY,
+				upY = downY - 24,
+				moveTimer = 0,
+				moving = false,
+				hidden = true,
 			})
 		end
 	end
@@ -456,7 +473,9 @@ local function buildMap(level, commands, header)
 				drawLedge(object)
 			elseif id == 2 then
 				local tile = if level.cloudOverride then 0x88 else AREA_BRICK[level.areaType + 1]
-				putHorizontal(level.map, width, x, row, tile, length + 1, true)
+				for offset = 0, length do
+					addBlock(x + offset, row, tile, "breakableBrick", nil)
+				end
 			elseif id == 3 then
 				putHorizontal(level.map, width, x, row, AREA_SOLID[level.areaType + 1], length + 1, true)
 			elseif id == 4 then
@@ -467,7 +486,9 @@ local function buildMap(level, commands, header)
 					end
 				end
 			elseif id == 5 then
-				putVertical(level.map, width, x, row, AREA_BRICK[level.areaType + 1], length + 1, true)
+				for offset = 0, length do
+					addBlock(x, row + offset, AREA_BRICK[level.areaType + 1], "breakableBrick", nil)
+				end
 			elseif id == 6 then
 				putVertical(level.map, width, x, row, AREA_SOLID[level.areaType + 1], length + 1, true)
 			end
@@ -502,9 +523,16 @@ local function buildMap(level, commands, header)
 				level.axeX = x * 16
 			elseif id == 3 then
 				putVertical(level.map, width, x, 7, 0x0C, 6, true)
+				level.chainX = x * 16
 			elseif id == 4 then
-				putVertical(level.map, width, x, 8, 0x89, 5, true)
+				-- CastleBridgeObj has a fixed 13-column span at row 8.
+				putHorizontal(level.map, width, x, 8, 0x89, 13, true)
 				level.bridgeX = x * 16
+				table.insert(level.bridges, {
+					x = x,
+					row = 8,
+					length = 13,
+				})
 			end
 		elseif object.kind == "special15" then
 			if id == 0 then
@@ -529,14 +557,12 @@ local function buildMap(level, commands, header)
 					end
 				end
 			elseif id == 4 then
-				-- Castle exit pipe: two-wide horizontal pipe with a vertical shaft.
-				put(level.map, width, x, row, 0x1D, true)
-				put(level.map, width, x + 1, row, 0x1C, true)
-				for dx = 2, math.max(2, length + 1) do
-					put(level.map, width, x + dx, row, 0x1E, true)
-				end
-				put(level.map, width, x, row + 1, 0x20, true)
-				put(level.map, width, x + 1, row + 1, 0x1F, true)
+				-- ExitPipe stores its vertical row in the low nybble; the pipe
+				-- itself is a fixed two-column sideways end-cap.
+				local pipeRow = math.clamp(length - 1, 0, 12)
+				level.exitPipeX = x * 16
+				put(level.map, width, x, pipeRow, 0x1C, true)
+				put(level.map, width, x + 1, pipeRow, 0x1F, true)
 			end
 		end
 	end
@@ -561,16 +587,42 @@ local function buildMap(level, commands, header)
 end
 
 local function pushEnemy(level, enemyType, x, y, extra)
+	local speed = if x > 64 then -0.55 else 0.55
+	if enemyType == 8 or enemyType == 0x15 then
+		speed = -1.5
+	elseif enemyType == 13 or enemyType == 45 then
+		speed = 0
+	end
+
 	local enemy = {
 		type = enemyType,
 		x = x,
 		y = y,
-		vx = if x > 64 then -0.55 else 0.55,
+		vx = speed,
 		vy = 0,
 		alive = true,
 		state = "walk",
 		static = false,
 	}
+	if enemyType == 13 then
+		enemy.state = "pipePlant"
+		enemy.vy = 1
+		enemy.downY = y
+		enemy.upY = y - 24
+		enemy.moveTimer = 0
+		enemy.moving = false
+		enemy.hidden = true
+	elseif enemyType == 5 then
+		enemy.walkTimer = 128
+	elseif enemyType == 45 then
+		enemy.originalX = x
+		enemy.health = 5
+		enemy.fireTimer = 150
+		enemy.frameTimer = 32
+	elseif enemyType == 0x15 then
+		enemy.state = "bowserFlame"
+		enemy.vx = -1.5
+	end
 	if extra then
 		for key, value in pairs(extra) do enemy[key] = value end
 	end
@@ -614,14 +666,16 @@ local function decodeEnemies(level, pointer, worldIndex, hardMode, primaryHardMo
 			index += 3
 		else
 			local x = page * 256 + bit32.band(first, 0xF0)
-			local y = bit32.band(first, 0x0F) * 16 - 32
+			-- Keep the row as a 16-pixel world coordinate. The framebuffer renderer
+			-- adds the 32-pixel status-bar offset for enemies just as it does for Mario.
+			local y = bit32.band(first, 0x0F) * 16
 			local enemyType = bit32.band(second, 0x3F)
 			local hardModeOnly = bit32.band(second, 0x40) ~= 0
 			if not hardModeOnly or hardMode then
 				if enemyType >= 0x37 and enemyType <= 0x3E then
 					local code = enemyType - 0x37
 					local count = if bit32.band(code, 0x01) ~= 0 then 3 else 2
-					local yPos = if bit32.band(code, 0x02) ~= 0 then 0x70 - 32 else 0xB0 - 32
+					local yPos = if bit32.band(code, 0x02) ~= 0 then 0x70 else 0xB0
 					local kind = if code < 4 then (if primaryHardMode then 2 else 6) else 0
 					for n = 0, count - 1 do
 						pushEnemy(level, kind, x + n * 24, yPos, { group = true })

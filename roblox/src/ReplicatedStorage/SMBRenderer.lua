@@ -369,6 +369,33 @@ function Renderer:drawSpriteTile(chr, tileId: number, x: number, y: number, area
 	end
 end
 
+function Renderer:drawVine(vine, cameraX: number, areaType: number)
+	if not vine.active or vine.height < 8 then
+		return
+	end
+	local topY = vine.bottomY - vine.height
+	local baseX = vine.x - 8 - cameraX
+	local groups = math.clamp(math.floor((vine.maxHeight or 48) / 48), 1, 2)
+	for group = 0, groups - 1 do
+		for segment = 0, 5 do
+			local tile = if group == 0 and segment == 0 then 0x28 else 0x2A
+			local x = baseX + (segment % 2) * 6
+			local y = 32 + topY + group * 48 + segment * 8
+			self:drawSpriteTile(
+				self.spriteData.enemies,
+				tile,
+				x,
+				y,
+				areaType,
+				1,
+				segment % 2 == 1,
+				false,
+				3072
+			)
+		end
+	end
+end
+
 function Renderer:drawMario(player, cameraX: number, areaType: number, frame: number)
 	local x = math.floor(player.x - cameraX)
 	local y = 32 + math.floor(player.y)
@@ -417,7 +444,9 @@ function Renderer:drawMario(player, cameraX: number, areaType: number, frame: nu
 		rows = { { frames[which][1], frames[which][2] }, { frames[which][3], frames[which][4] } }
 	end
 
-	local palette = if power >= 2 then MARIO_PALETTES[3] else MARIO_PALETTES[1]
+	local palette = if power >= 2 then MARIO_PALETTES[3]
+		elseif player.currentPlayer == 2 then MARIO_PALETTES[2]
+		else MARIO_PALETTES[1]
 	if player.starFrames and player.starFrames > 0 then
 		palette = STAR_PALETTES[math.floor(frame / 4) % #STAR_PALETTES + 1]
 	end
@@ -433,6 +462,9 @@ function Renderer:drawMario(player, cameraX: number, areaType: number, frame: nu
 end
 
 function Renderer:drawEnemy(enemy, cameraX: number, areaType: number, frame: number)
+	if enemy.type == 13 and enemy.hidden then
+		return
+	end
 	if not enemy.alive or enemy.state == "dead" or enemy.state == "squashed" then
 		if enemy.state == "squashed" and enemy.alive then
 			local chr = self.spriteData.enemies
@@ -445,11 +477,13 @@ function Renderer:drawEnemy(enemy, cameraX: number, areaType: number, frame: num
 	end
 
 	local chr = self.spriteData.enemies
-	local x = math.floor(enemy.x - cameraX)
+	local worldX = if enemy.type == 13 then enemy.x - 8 else enemy.x
+	local x = math.floor(worldX - cameraX)
 	local y = 32 + math.floor(enemy.y)
 	local tick = math.floor(frame / 8) % 2
 	local facingLeft = enemy.vx < 0
 	local bankOffset = if enemy.type == 12 or enemy.type == 45 then 2048
+		elseif enemy.type == 0x15 then 3072
 		elseif enemy.type == 5 or enemy.type == 7 or enemy.type == 13 or enemy.type == 17 then 1024
 		else 0
 	local function sprite(tile, dx, dy, palette, flipX, flipY)
@@ -573,7 +607,7 @@ function Renderer:drawHud(state)
 		buffer.copy(self.pixels, row * STRIDE, self.blackRow, 0, STRIDE)
 	end
 	local bright = 0x30
-	self:drawText(16, 5, "MARIO", bright)
+	self:drawText(16, 5, if state.currentPlayer == 2 then "LUIGI" else "MARIO", bright)
 	self:drawText(86, 5, "TOP", bright)
 	self:drawText(137, 5, "X", bright)
 	self:drawText(158, 5, "WORLD", bright)
@@ -654,6 +688,11 @@ function Renderer:draw(state)
 		local bg = level.backgroundColor or Data.BGColor[areaType + 1] or 0x0F
 		self:clear(bg)
 		local cameraX = math.floor(state.cameraX or 0)
+		for _, vine in ipairs(state.vines or {}) do
+			if vine.active and vine.x + 16 >= cameraX and vine.x <= cameraX + W then
+				self:drawVine(vine, cameraX, areaType)
+			end
+		end
 		local startCol = math.max(0, math.floor(cameraX / 16))
 		local endCol = math.min(level.width - 1, startCol + 17)
 		for worldCol = startCol, endCol do
